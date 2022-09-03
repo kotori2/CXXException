@@ -8,6 +8,7 @@
 #include "StackTrace.h"
 #include <atomic>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 
