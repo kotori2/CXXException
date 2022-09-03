@@ -141,7 +141,7 @@ ModuleList load_modules_symbols(HANDLE process, DWORD) {
     return modules;
 }
 
-StackTrace::StackTrace(std::string_view exception_name): exception_name_(exception_name) {
+CXXException::StackTrace::StackTrace(std::string_view exception_name): exception_name_(exception_name) {
     HANDLE thread;
 
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
@@ -158,7 +158,7 @@ StackTrace::StackTrace(std::string_view exception_name): exception_name_(excepti
     CloseHandle(thread);
 }
 
-bool StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
+bool CXXException::StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
     HANDLE process = GetCurrentProcess();
     int frame_number = 0;
     SymHandler handler(process);
@@ -184,7 +184,7 @@ bool StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
     return true;
 }
 
-std::string StackTrace::to_string() {
+std::string CXXException::StackTrace::to_string() {
     std::stringstream os;
     IMAGEHLP_LINE64 line = {0};
     line.SizeOfStruct = sizeof line;

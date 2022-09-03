@@ -6,7 +6,7 @@
 #include <Windows.h>
 #include <Psapi.h>
 #include <ehdata_forceinclude.h>
-#include "StackTraceSaver.h"
+#include <CXXException/StackTraceSaver.h>
 
 FARPROC SearchProcAddress(const char* func_name) {
     DWORD processID = GetCurrentProcessId();
