@@ -229,6 +229,7 @@ std::string CXXException::StackTrace::to_string() {
 
 #include <iostream>
 #include <sstream>
+#include <cstring>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <exception>
@@ -279,7 +280,7 @@ namespace CXXException {
         for (int i = 0; i < items_.size() - skip_stacks; i++) {
             Dl_info info;
             auto frame = last_frames[i + skip_stacks];
-            if (dladdr(frame, &info)) {
+            if (dladdr(frame, &info) && info.dli_sname) {
                 int status;
                 char *demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
                 const char *func_name = status == 0 ? demangled : info.dli_sname;
@@ -292,6 +293,7 @@ namespace CXXException {
                              (char *) frame - (char *) info.dli_saddr);
                 free(demangled);
             } else {
+                buf.resize(100);
                 l = snprintf(buf.data(), buf.size(), "%-3d %0*p ??\n",
                              i, 2 + sizeof(void *) * 2, frame);
             }

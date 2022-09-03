@@ -71,12 +71,19 @@ namespace {
 }
 
 extern "C" {
-void __cxa_throw(void *ex, std::type_info *info, void (*dest)(void *)) {
+inline void cxa_throw(void *ex, std::type_info *info, void (*dest)(void *)) {
     std::string exception_name = demangle(reinterpret_cast<const std::type_info*>(info)->name());
     CXXException::StackTraceSaver::instance()->insert(ex, exception_name);
 
     static auto rethrow = reinterpret_cast<void (*)(void*,std::type_info *,void(*)(void*))>(dlsym(RTLD_NEXT, "__cxa_throw"));
     rethrow(ex,info,dest);
 }
+
+#if !__clang__
+void __cxa_throw(void *ex, void* info, void (*dest)(void*)) { cxa_throw(ex, reinterpret_cast<std::type_info *>(info), dest); }
+#else
+void __cxa_throw(void *ex, std::type_info* info, void (*dest)(void*)) { cxa_throw(ex, info, dest) }
+#endif
+
 }
 #endif
