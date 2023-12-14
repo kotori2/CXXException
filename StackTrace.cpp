@@ -234,6 +234,7 @@ std::string CXXException::StackTrace::to_string() {
 #include <execinfo.h>
 #include <exception>
 #include <cxxabi.h>
+#include <cinttypes>
 
 namespace CXXException {
     constexpr int PTR_SIZE = sizeof(void *);
@@ -280,6 +281,7 @@ namespace CXXException {
         for (int i = 0; i < items_.size() - skip_stacks; i++) {
             Dl_info info;
             auto frame = last_frames[i + skip_stacks];
+            constexpr int ptr_size = 2 + sizeof(void *) * 2;
             if (dladdr(frame, &info) && info.dli_sname) {
                 int status;
                 char *demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
@@ -287,15 +289,15 @@ namespace CXXException {
                 size_t func_size = strlen(func_name);
                 buf.resize(func_size + 100);
 
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*p %s + %zd\n",
-                             i, 2 + sizeof(void *) * 2, frame,
+                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " %s + %zd\n",
+                             i, ptr_size, reinterpret_cast<uintptr_t>(frame),
                              status == 0 ? demangled : info.dli_sname,
                              (char *) frame - (char *) info.dli_saddr);
                 free(demangled);
             } else {
                 buf.resize(100);
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*p ??\n",
-                             i, 2 + sizeof(void *) * 2, frame);
+                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " ??\n",
+                             i, ptr_size, reinterpret_cast<uintptr_t>(frame));
             }
             buf.resize(l);
             trace_buf << buf;
