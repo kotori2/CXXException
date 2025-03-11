@@ -23,7 +23,7 @@ FARPROC SearchProcAddress(const char* func_name) {
     // Get a list_ of all the modules in this process.
     EnumProcessModules(hProcess, nullptr, 0, &cbNeeded);
     hMods.resize(cbNeeded);
-    if( EnumProcessModules(hProcess, &hMods[0], hMods.size(), &cbNeeded)) {
+    if(EnumProcessModules(hProcess, &hMods[0], static_cast<DWORD>(hMods.size()), &cbNeeded)) {
         for (const auto hMod: hMods) {
             wchar_t szModName[MAX_PATH];
 
