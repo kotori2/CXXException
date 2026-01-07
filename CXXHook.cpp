@@ -47,8 +47,6 @@ FARPROC SearchProcAddress(const char* func_name) {
 
 extern "C" {
 __declspec(noreturn) void __stdcall _CxxThrowException(void *pExceptionObject, _ThrowInfo *pThrowInfo) noexcept(false) {
-    auto* pTI = (ThrowInfo*)pThrowInfo;
-
     // std::cout << pExceptionObject << std::endl;
     CXXException::StackTraceSaver::instance()->insert(pExceptionObject, "");
     static auto rethrow = (void (*)(void *, _ThrowInfo *)) SearchProcAddress("_CxxThrowException");
