@@ -133,9 +133,9 @@ ModuleList load_modules_symbols(HANDLE process, DWORD) {
     DWORD cbNeeded;
     std::vector<HMODULE> module_handles(1);
 
-    EnumProcessModules(process, &module_handles[0], module_handles.size() * sizeof(HMODULE), &cbNeeded);
+    EnumProcessModules(process, &module_handles[0], static_cast<DWORD>(module_handles.size()) * sizeof(HMODULE), &cbNeeded);
     module_handles.resize(cbNeeded/sizeof(HMODULE));
-    EnumProcessModules(process, &module_handles[0], module_handles.size() * sizeof(HMODULE), &cbNeeded);
+    EnumProcessModules(process, &module_handles[0], static_cast<DWORD>(module_handles.size()) * sizeof(HMODULE), &cbNeeded);
 
     std::transform(module_handles.begin(), module_handles.end(), std::back_inserter(modules), get_mod_info(process));
     return modules;
