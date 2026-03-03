@@ -16,7 +16,7 @@ void f3() {
     try {
         f2();
     } catch (std::exception &e) {
-        auto st = CXXException::StackTraceSaver::instance()->retrieve(&e);
+        auto st = CXXException::StackTraceSaver::instance().retrieve(&e);
         std::cout << st->to_string() << std::endl;
     }
 }
