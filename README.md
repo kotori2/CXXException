@@ -16,7 +16,7 @@ Obtain Exception:
 try {
     throw std::logic_error("anything");
 } catch (std::exception &e) {
-    auto st = CXXException::StackTraceSaver::instance()->retrieve(&e);
+    auto st = CXXException::StackTraceSaver::instance().retrieve(&e);
     std::cout << st->to_string() << std::endl;
 }
 ```
