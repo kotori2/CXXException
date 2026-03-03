@@ -45,8 +45,12 @@ FARPROC SearchProcAddress(const char* func_name) {
 }
 
 
+// _CxxThrowException must NOT carry __declspec(dllexport) here: MSVC's compiler
+// has an internal C++ declaration of the symbol, and combining extern "C" with
+// dllexport triggers C2375 (redefinition; different linkage).  For the shared
+// build, the symbol is exported via CXXException.def instead.
 extern "C" {
-CXXEXCEPTION_API __declspec(noreturn) void __stdcall _CxxThrowException(void *pExceptionObject, _ThrowInfo *pThrowInfo) noexcept(false) {
+__declspec(noreturn) void __stdcall _CxxThrowException(void *pExceptionObject, _ThrowInfo *pThrowInfo) noexcept(false) {
     // std::cout << pExceptionObject << std::endl;
     CXXException::StackTraceSaver::instance().insert(pExceptionObject, "");
     static auto rethrow = (void (*)(void *, _ThrowInfo *)) SearchProcAddress("_CxxThrowException");

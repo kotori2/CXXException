@@ -19,8 +19,16 @@ target_include_directories(CXXException_example PUBLIC ${CXXException_INCLUDE_DI
 target_include_directories(CXXException_static PUBLIC ${CXXException_INCLUDE_DIR})
 target_include_directories(CXXException_shared PUBLIC ${CXXException_INCLUDE_DIR})
 set_target_properties(CXXException_static PROPERTIES OUTPUT_NAME CXXException)
-set_target_properties(CXXException_shared PROPERTIES OUTPUT_NAME CXXException)
+set_target_properties(CXXException_shared PROPERTIES
+        OUTPUT_NAME CXXException
+        ARCHIVE_OUTPUT_NAME CXXException_imp)
 target_compile_definitions(CXXException_shared PRIVATE CXXEXCEPTION_SHARED_BUILD)
+# On Windows, _CxxThrowException cannot carry __declspec(dllexport) without
+# triggering C2375 (conflicts with the compiler's internal C++ declaration).
+# Export it via a module definition file instead.
+if(WIN32)
+    target_sources(CXXException_shared PRIVATE CXXException.def)
+endif()
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 enable_testing()
