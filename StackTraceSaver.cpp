@@ -6,7 +6,10 @@
 
 
 namespace CXXException {
-    std::atomic<StackTraceSaver *> StackTraceSaver::instance_ = nullptr;
+    CXXEXCEPTION_API StackTraceSaver& StackTraceSaver::instance() {
+        static StackTraceSaver inst;
+        return inst;
+    }
 
     void StackTraceSaver::insert(void *exception, std::string_view exception_name) {
         std::lock_guard lg(mutex_);

@@ -5,8 +5,8 @@
 #ifndef CXXEXCEPTION_STACKTRACESAVER_H
 #define CXXEXCEPTION_STACKTRACESAVER_H
 
+#include "Defines.h"
 #include "StackTrace.h"
-#include <atomic>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -27,9 +27,7 @@ namespace CXXException {
         std::mutex mutex_;
         LinkedList *available_head_ = &list_[0];
 
-        static std::atomic<StackTraceSaver *>instance_;
-
-        inline StackTraceSaver() {
+        StackTraceSaver() {
             for (int i = 0; i < SAVE_SIZE - 1; i++) {
                 list_[i].next = &list_[i + 1];
             }
@@ -37,14 +35,11 @@ namespace CXXException {
         }
 
     public:
-        static inline StackTraceSaver *instance() noexcept {
-            if (!instance_) instance_ = new StackTraceSaver();
-            return instance_;
-        }
+        CXXEXCEPTION_API static StackTraceSaver& instance();
 
-        void insert(void *exception, std::string_view exception_name);
+        CXXEXCEPTION_API void insert(void *exception, std::string_view exception_name);
 
-        std::shared_ptr<StackTrace> retrieve(void *exception);
+        CXXEXCEPTION_API std::shared_ptr<StackTrace> retrieve(void *exception);
     };
 }
 

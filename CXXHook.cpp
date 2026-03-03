@@ -48,7 +48,7 @@ FARPROC SearchProcAddress(const char* func_name) {
 extern "C" {
 __declspec(noreturn) void __stdcall _CxxThrowException(void *pExceptionObject, _ThrowInfo *pThrowInfo) noexcept(false) {
     // std::cout << pExceptionObject << std::endl;
-    CXXException::StackTraceSaver::instance()->insert(pExceptionObject, "");
+    CXXException::StackTraceSaver::instance().insert(pExceptionObject, "");
     static auto rethrow = (void (*)(void *, _ThrowInfo *)) SearchProcAddress("_CxxThrowException");
     rethrow(pExceptionObject, pThrowInfo);
 }
@@ -71,7 +71,7 @@ namespace {
 extern "C" {
 [[noreturn]] inline void cxa_throw(void *ex, std::type_info *info, void (*dest)(void *)) {
     std::string exception_name = demangle(reinterpret_cast<const std::type_info*>(info)->name());
-    CXXException::StackTraceSaver::instance()->insert(ex, exception_name);
+    CXXException::StackTraceSaver::instance().insert(ex, exception_name);
 
     static auto rethrow = reinterpret_cast<void (*)(void*,std::type_info *,void(*)(void*))>(dlsym(RTLD_NEXT, "__cxa_throw"));
     rethrow(ex,info,dest);

@@ -5,6 +5,7 @@
 #ifndef CXXEXCEPTION_STACKTRACE_H
 #define CXXEXCEPTION_STACKTRACE_H
 
+#include "Defines.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -33,7 +34,7 @@ namespace CXXException {
     public:
         explicit StackTrace(std::string_view exception_name);
 
-        std::string to_string();
+        CXXEXCEPTION_API std::string to_string();
     };
 }
 
