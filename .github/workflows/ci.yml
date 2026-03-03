@@ -12,19 +12,86 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        build_type: [Debug, Release]
+        include:
+          # ── Linux ─────────────────────────────────────────────────────────
+          - name: Linux / GCC / Debug
+            os: ubuntu-latest
+            build_type: Debug
+            cmake_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          - name: Linux / GCC / Release
+            os: ubuntu-latest
+            build_type: Release
+            cmake_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          - name: Linux / Clang / Debug
+            os: ubuntu-latest
+            build_type: Debug
+            cmake_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - name: Linux / Clang / Release
+            os: ubuntu-latest
+            build_type: Release
+            cmake_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+          # ── macOS ─────────────────────────────────────────────────────────
+          - name: macOS / Clang / Debug
+            os: macos-latest
+            build_type: Debug
+            cmake_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - name: macOS / Clang / Release
+            os: macos-latest
+            build_type: Release
+            cmake_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - name: macOS / GCC / Debug
+            os: macos-latest
+            build_type: Debug
+            brew_gcc: true
+          - name: macOS / GCC / Release
+            os: macos-latest
+            build_type: Release
+            brew_gcc: true
+
+          # ── Windows ───────────────────────────────────────────────────────
+          - name: Windows / MSVC / Debug
+            os: windows-latest
+            build_type: Debug
+          - name: Windows / MSVC / Release
+            os: windows-latest
+            build_type: Release
+          - name: Windows / Clang-cl / Debug
+            os: windows-latest
+            build_type: Debug
+            cmake_args: -T ClangCL
+          - name: Windows / Clang-cl / Release
+            os: windows-latest
+            build_type: Release
+            cmake_args: -T ClangCL
+          - name: Windows / MinGW / Debug
+            os: windows-latest
+            build_type: Debug
+            cmake_args: -GNinja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          - name: Windows / MinGW / Release
+            os: windows-latest
+            build_type: Release
+            cmake_args: -GNinja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install GCC (macOS)
+        if: matrix.brew_gcc
+        run: |
+          brew install gcc
+          GCC_BIN=$(ls "$(brew --prefix)/bin/gcc-"[0-9]* | sort -V | tail -1)
+          echo "CC=$GCC_BIN"             >> "$GITHUB_ENV"
+          echo "CXX=${GCC_BIN/gcc/g++}" >> "$GITHUB_ENV"
+
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        shell: bash
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ${{ matrix.cmake_args }}
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
