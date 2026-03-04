@@ -146,15 +146,10 @@ CXXException::StackTrace::StackTrace(std::string_view exception_name): exception
 
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
                     GetCurrentProcess(), &thread, 0, false, DUPLICATE_SAME_ACCESS);
-    auto wrap = [this, thread](auto info) -> DWORD{
-        parse_stack(thread, *(info->ContextRecord));
-        return EXCEPTION_EXECUTE_HANDLER;
-    };
-    auto wrap2 = [wrap](){
-        __try { throw std::exception(); }
-        __except (wrap(GetExceptionInformation())) {  }
-    };
-    wrap2();
+    CONTEXT ctx = {};
+    ctx.ContextFlags = CONTEXT_FULL;
+    RtlCaptureContext(&ctx);
+    try { parse_stack(thread, ctx); } catch (...) {}
     CloseHandle(thread);
 }
 
@@ -195,13 +190,14 @@ std::string CXXException::StackTrace::to_string() {
     auto modules = load_modules_symbols(process, GetCurrentProcessId());
 
 #ifdef NDEBUG
-    constexpr int skip_stacks = 10;
+    constexpr int skip_stacks = 3;
 #else
-    constexpr int skip_stacks = 15;
+    constexpr int skip_stacks = 5;
 #endif
 
-    for (auto i = items_.begin() + skip_stacks; i != items_.end(); i++) {
-        auto &&s = (*i).frame;
+    const int skip = std::min(skip_stacks, static_cast<int>(items_.size()));
+    for (auto i = items_.begin() + skip; i != items_.end(); ++i) {
+        auto &&s = i->frame;
         if ( s.AddrPC.Offset != 0 ) {
             // find module
             module_data module{};

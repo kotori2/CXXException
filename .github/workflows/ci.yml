@@ -96,6 +96,6 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
 
-      - name: Test
+      - name: Test (1000 runs)
         working-directory: build
-        run: ctest -C ${{ matrix.build_type }} --output-on-failure
+        run: ctest -C ${{ matrix.build_type }} --repeat until-fail:1000 --output-on-failure
