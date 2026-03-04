@@ -12,6 +12,7 @@
 #ifdef WIN32
 #include <Windows.h>
 #include <ImageHlp.h>
+#include <cstdint>
 #else
 
 #endif

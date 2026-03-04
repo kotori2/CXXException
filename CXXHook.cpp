@@ -2,47 +2,31 @@
 // Created by kotori on 2022/6/12.
 //
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <Psapi.h>
+#include <vector>
+// Returns the address of func_name from any loaded DLL other than our own module.
+static FARPROC SearchProcAddress(const char *func_name) {
+    HMODULE self = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCSTR>(&SearchProcAddress), &self);
+    DWORD cb = 0;
+    EnumProcessModules(GetCurrentProcess(), nullptr, 0, &cb);
+    std::vector<HMODULE> mods(cb / sizeof(HMODULE));
+    EnumProcessModules(GetCurrentProcess(), mods.data(), cb, &cb);
+    for (HMODULE m : mods) {
+        if (m == self) continue;
+        if (FARPROC fn = GetProcAddress(m, func_name)) return fn;
+    }
+    return nullptr;
+}
+#endif
+
+#ifdef _MSC_VER
 #include <ehdata_forceinclude.h>
 #include <CXXException/StackTraceSaver.h>
-
-FARPROC SearchProcAddress(const char* func_name) {
-    DWORD processID = GetCurrentProcessId();
-    std::vector<HMODULE> hMods;
-    DWORD cbNeeded;
-    FARPROC result = nullptr;
-
-    // Get a handle to the process.
-    HANDLE hProcess = OpenProcess( PROCESS_QUERY_INFORMATION |
-                                   PROCESS_VM_READ,
-                                   FALSE, processID );
-    if (nullptr == hProcess) return nullptr;
-
-    // Get a list_ of all the modules in this process.
-    EnumProcessModules(hProcess, nullptr, 0, &cbNeeded);
-    hMods.resize(cbNeeded);
-    if(EnumProcessModules(hProcess, &hMods[0], static_cast<DWORD>(hMods.size()), &cbNeeded)) {
-        for (const auto hMod: hMods) {
-            wchar_t szModName[MAX_PATH];
-
-            // Get the full path to the module's file.
-            if (GetModuleFileNameW(hMod, szModName, sizeof(szModName) / sizeof(wchar_t))) {
-                // wprintf( L"\t%ls (0x%08X)\n", szModName, hMod );
-                if (wcsstr(szModName, L"VCRUNTIME") == nullptr) continue;
-                // Print the module name and handle value.
-
-                result = GetProcAddress(hMod, func_name);
-                if (result) break;
-            }
-        }
-    }
-    // Release the handle to the process.
-    CloseHandle( hProcess );
-
-    return result;
-}
 
 
 // _CxxThrowException must NOT carry __declspec(dllexport) here: MSVC's compiler
@@ -61,8 +45,11 @@ __declspec(noreturn) void __stdcall _CxxThrowException(void *pExceptionObject, _
 #include <string>
 #include <typeinfo>
 #include <cxxabi.h>
+#include <CXXException/StackTraceSaver.h>
+
+#if !defined(_WIN32)
 #include <dlfcn.h>
-#include "include/CXXException/StackTraceSaver.h"
+#endif
 
 namespace {
     std::string demangle(const char *name) {
@@ -122,6 +109,10 @@ extern "C" {
     // fixup (before interposing) to the real libc++abi.__cxa_throw address.
     static auto rethrow = reinterpret_cast<void (*)(void*,std::type_info *,void(*)(void*))>(
         (void*)_interpose_cxa_throw.replacee);
+#elif defined(_WIN32)
+    // MinGW: GCC uses void* for the type_info parameter in __cxa_throw.
+    static auto rethrow = reinterpret_cast<void (*)(void*,void*,void(*)(void*))>(
+        SearchProcAddress("__cxa_throw"));
 #else
     static auto rethrow = reinterpret_cast<void (*)(void*,std::type_info *,void(*)(void*))>(
         dlsym(RTLD_NEXT, "__cxa_throw"));

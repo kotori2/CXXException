@@ -33,6 +33,15 @@ if(WIN32)
     target_sources(CXXException_shared PRIVATE CXXException.def)
 endif()
 
+# MinGW ignores #pragma comment(lib,...); link psapi and dbghelp explicitly.
+# (MSVC handles these via #pragma comment in StackTrace.cpp, so only needed
+# for non-MSVC Windows builds.)
+if(WIN32 AND NOT MSVC)
+    foreach(_tgt CXXException_static CXXException_shared CXXException_example)
+        target_link_libraries(${_tgt} PUBLIC psapi dbghelp)
+    endforeach()
+endif()
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 enable_testing()
 
