@@ -87,7 +87,13 @@ namespace {
 
 // __cxa_throw is declared in namespace __cxxabiv1 in <cxxabi.h> and is not
 // visible at file scope by its plain C name; forward-declare it here.
+// GCC's libstdc++ (ext/concurrence.h) uses void* for the type_info parameter;
+// Clang's libc++abi uses std::type_info*.  Match whichever the compiler expects.
+#if __clang__
 extern "C" void __cxa_throw(void *, std::type_info *, void (*)(void *));
+#else
+extern "C" void __cxa_throw(void *, void *, void (*)(void *));
+#endif
 // Forward-declare cxa_throw so its address can appear in the struct initialiser.
 extern "C" [[noreturn]] void cxa_throw(void *, std::type_info *, void (*)(void *));
 
