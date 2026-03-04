@@ -3,7 +3,9 @@ project(CXXException)
 
 set(CMAKE_CXX_STANDARD 20)
 
-if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    add_compile_options(/utf-8)
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 endif()
 
