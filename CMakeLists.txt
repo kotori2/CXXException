@@ -3,7 +3,7 @@ project(CXXException)
 
 set(CMAKE_CXX_STANDARD 20)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+if(MSVC)
     add_compile_options(/utf-8)
     add_compile_definitions(NOMINMAX)
 else()
