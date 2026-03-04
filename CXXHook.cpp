@@ -25,6 +25,11 @@ static FARPROC SearchProcAddress(const char *func_name) {
 #endif
 
 #ifdef _MSC_VER
+#ifdef __clang__
+// clang-cl does not pre-inject _ThrowInfo; forward-declare it so the pointer
+// use in ehdata_forceinclude.h and our own signatures compile cleanly.
+struct _ThrowInfo;
+#endif
 #include <ehdata_forceinclude.h>
 #include <CXXException/StackTraceSaver.h>
 
