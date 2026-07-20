@@ -89,7 +89,7 @@ namespace CXXException::detail {
 
             // __LINKEDIT holds the symbol/string/function-starts data; its file
             // offsets map to memory through this base.
-            auto linkedit = reinterpret_cast<const std::uint8_t *>(
+            const auto linkedit = reinterpret_cast<const std::uint8_t *>(
                     base + linkedit_vmaddr - text_vmaddr - linkedit_fileoff);
 
             // Function boundaries (ULEB128 deltas cumulative from __TEXT vmaddr).
@@ -100,7 +100,7 @@ namespace CXXException::detail {
                 addr += delta;
                 table.starts.push_back(addr + slide);
             }
-            std::sort(table.starts.begin(), table.starts.end());
+            std::ranges::sort(table.starts);
 
             // Named function symbols.
             if (symtab) {
@@ -115,11 +115,13 @@ namespace CXXException::detail {
                     const char *nm = strs + s.n_un.n_strx;
                     if (nm[0] == '\0') continue;
                     if (nm[0] == '_') ++nm;  // strip the C symbol underscore
-                    table.syms.push_back({static_cast<std::uintptr_t>(s.n_value) + slide,
-                                          std::string(nm)});
+                    table.syms.push_back({
+                        .value = static_cast<std::uintptr_t>(s.n_value) + slide,
+                        .name = std::string(nm)
+                    });
                 }
-                std::sort(table.syms.begin(), table.syms.end(),
-                          [](const FuncSym &a, const FuncSym &b) { return a.value < b.value; });
+                std::ranges::sort(table.syms,
+                                  [](const FuncSym &a, const FuncSym &b) { return a.value < b.value; });
             }
 
             table.loaded = !table.starts.empty();
@@ -129,7 +131,7 @@ namespace CXXException::detail {
         const MachoTable &get_table(const char *path, const void *fbase) {
             static std::mutex cache_mutex;
             static std::unordered_map<std::string, MachoTable> cache;
-            std::lock_guard<std::mutex> lg(cache_mutex);
+            std::lock_guard lg(cache_mutex);
             auto it = cache.find(path);
             if (it != cache.end()) return it->second;
             return cache.emplace(path, parse_macho(fbase)).first->second;
@@ -165,14 +167,13 @@ namespace CXXException::detail {
                                   : addr - reinterpret_cast<std::uintptr_t>(info.dli_fbase);
         if (table.loaded) {
             // Which function does the call site fall in?
-            auto sit = std::upper_bound(table.starts.begin(), table.starts.end(), lookup);
+            auto sit = std::ranges::upper_bound(table.starts, lookup);
             if (sit != table.starts.begin()) {
                 const std::uintptr_t fstart = *(sit - 1);
-                const std::uintptr_t fend =
-                        (sit == table.starts.end()) ? UINTPTR_MAX : *sit;
+                const std::uintptr_t fend = sit == table.starts.end() ? UINTPTR_MAX : *sit;
                 // Name it only if a symbol sits inside this function's interval;
                 // otherwise it is a real-but-stripped function -> module+offset.
-                auto yit = std::upper_bound(table.syms.begin(), table.syms.end(), lookup,
+                const auto yit = std::upper_bound(table.syms.begin(), table.syms.end(), lookup,
                                             [](std::uintptr_t k, const FuncSym &s) { return k < s.value; });
                 if (yit != table.syms.begin() && (yit - 1)->value >= fstart && (yit - 1)->value < fend) {
                     rf.function = demangle((yit - 1)->name.c_str());

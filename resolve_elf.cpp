@@ -48,7 +48,7 @@ namespace CXXException::detail {
                 if (fd < 0) return;
                 struct stat st{};
                 if (fstat(fd, &st) == 0 && st.st_size > 0) {
-                    void *m = mmap(nullptr, static_cast<size_t>(st.st_size),
+                    const void *m = mmap(nullptr, static_cast<size_t>(st.st_size),
                                    PROT_READ, MAP_PRIVATE, fd, 0);
                     if (m != MAP_FAILED) {
                         data = static_cast<const char *>(m);
@@ -127,7 +127,7 @@ namespace CXXException::detail {
         const SymbolTable &get_table(const std::string &path) {
             static std::mutex cache_mutex;
             static std::unordered_map<std::string, SymbolTable> cache;
-            std::lock_guard<std::mutex> lg(cache_mutex);
+            std::lock_guard lg(cache_mutex);
             auto it = cache.find(path);
             if (it != cache.end()) return it->second;
             return cache.emplace(path, parse_elf(path)).first->second;
