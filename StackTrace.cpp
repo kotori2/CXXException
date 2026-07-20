@@ -3,6 +3,7 @@
 //
 
 #include <CXXException/StackTrace.h>
+#include "SymbolResolver.h"
 
 #ifdef WIN32
 #include <Windows.h>
@@ -11,7 +12,6 @@
 #include <vector>
 #include <Psapi.h>
 #include <algorithm>
-#include <iostream>
 #include <stdexcept>
 #include <iterator>
 #include <sstream>
@@ -20,8 +20,7 @@
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "dbghelp.lib")
 
-// Some versions of imagehlp.dll lack the proper packing directives themselves
-// so we need to do it.
+// Some imagehlp.dll versions lack their own packing directives.
 #pragma pack( push, before_imagehlp, 8 )
 #pragma pack( pop, before_imagehlp )
 
@@ -75,31 +74,6 @@ void sym_options(DWORD add, DWORD remove=0) {
     symOptions &= ~remove;
     SymSetOptions(symOptions);
 }
-
-class symbol {
-    typedef IMAGEHLP_SYMBOL64 sym_type;
-    sym_type *sym;
-    static const int max_name_len = 1024;
-public:
-    symbol(HANDLE process, DWORD64 address) : sym((sym_type *)::operator new(sizeof(*sym) + max_name_len)) {
-        memset(sym, 0, sizeof(*sym) + max_name_len);
-        sym->SizeOfStruct = sizeof(*sym);
-        sym->MaxNameLength = max_name_len;
-        DWORD64 displacement;
-
-        if (!SymGetSymFromAddr64(process, address, &displacement, sym)) {
-            // throw std::logic_error("Bad symbol");
-        }
-
-    }
-
-    [[maybe_unused]] std::string name() { return sym->Name; }
-    std::string undecorated_name() {
-        std::vector<char> und_name(max_name_len);
-        UnDecorateSymbolName(sym->Name, &und_name[0], max_name_len, UNDNAME_COMPLETE);
-        return {&und_name[0], strlen(&und_name[0])};
-    }
-};
 
 class get_mod_info {
     HANDLE process;
@@ -179,15 +153,10 @@ bool CXXException::StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
     return true;
 }
 
-std::string CXXException::StackTrace::to_string() {
-    std::stringstream os;
-    IMAGEHLP_LINE64 line = {0};
-    line.SizeOfStruct = sizeof line;
-    DWORD offset_from_symbol = 0;
-    auto process = GetCurrentProcess();
-    SymHandler handler(process, nullptr, true);
-
-    auto modules = load_modules_symbols(process, GetCurrentProcessId());
+std::string CXXException::StackTrace::to_string() const {
+    std::ostringstream os;
+    // dbghelp session for detail::resolve_frame (SymInitialize / SymCleanup, RAII).
+    SymHandler handler(GetCurrentProcess(), nullptr, true);
 
 #ifdef NDEBUG
     constexpr int skip_stacks = 3;
@@ -195,42 +164,31 @@ std::string CXXException::StackTrace::to_string() {
     constexpr int skip_stacks = 5;
 #endif
 
+    // Same format as the POSIX path: #<idx>  <module>+0x<rel>  <func>+0x<off>.
     const int skip = std::min(skip_stacks, static_cast<int>(items_.size()));
-    for (auto i = items_.begin() + skip; i != items_.end(); ++i) {
-        auto &&s = i->frame;
-        if ( s.AddrPC.Offset != 0 ) {
-            // find module
-            module_data module{};
-            for (const auto &m: modules) {
-                auto base_address = reinterpret_cast<uintptr_t>(m.base_address);
-                if (s.AddrPC.Offset > base_address && s.AddrPC.Offset < base_address + m.load_size) {
-                    module = m;
-                    break;
-                }
-            }
-            // auto base_address = reinterpret_cast<uintptr_t>(module.base_address);
-            os << "0x" << std::setfill('0') << std::setw(4) << std::hex << s.AddrPC.Offset << " ";
-            os << "[" << module.module_name << "] ";
-            os << std::dec << symbol(process, s.AddrPC.Offset).undecorated_name();
-            if (SymGetLineFromAddr64( process, s.AddrPC.Offset, &offset_from_symbol, &line ) )
-                os << "\t" << line.FileName << "(" << line.LineNumber << ")";
-        } else {
-            os << "(No Symbols: PC == 0)";
-        }
-        os << std::endl;
+    int frame_idx = 0;
+    for (auto i = items_.begin() + skip; i != items_.end(); ++i, ++frame_idx) {
+        auto pc = reinterpret_cast<void *>(i->frame.AddrPC.Offset);
+        detail::ResolvedFrame rf = detail::resolve_frame(pc);
+        os << "#" << std::setw(2) << std::setfill(' ') << frame_idx << "  "
+           << (rf.module.empty() ? "?" : rf.module)
+           << "+0x" << std::hex << rf.rel_addr << std::dec;
+        if (!rf.function.empty())
+            os << "  " << rf.function << "+0x" << std::hex << rf.func_offset << std::dec;
+        os << "\n";
     }
     return os.str();
 }
 #else
 
-#include <iostream>
-#include <sstream>
-#include <cstring>
-#include <dlfcn.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <execinfo.h>
-#include <exception>
-#include <cxxabi.h>
-#include <cinttypes>
+#include <iomanip>
+#include <new>
+#include <sstream>
+#include <string>
 
 namespace CXXException {
     constexpr int PTR_SIZE = sizeof(void *);
@@ -260,46 +218,47 @@ namespace CXXException {
         free(last_frames);
     }
 
-    std::string StackTrace::to_string() {
-        void **last_frames = static_cast<void **>(malloc(items_.size() * PTR_SIZE));
-        for (int i = 0; i < items_.size(); i++) {
-            last_frames[i] = items_[i].frame;
-        }
-        std::string buf;
-        std::ostringstream trace_buf;
-        int l;
+    std::string StackTrace::to_string() const {
+        // Resolve all frames first; the names let us find and drop our own throw
+        // machinery (the __cxa_throw hook and the StackTrace construction path).
+        std::vector<detail::ResolvedFrame> resolved(items_.size());
+        for (size_t i = 0; i < items_.size(); ++i)
+            resolved[i] = detail::resolve_frame(items_[i].frame);
 
-#ifdef NDEBUG
-        constexpr int skip_stacks = 3;
-#else
-        constexpr int skip_stacks = 10;
-#endif
-        for (int i = 0; i < items_.size() - skip_stacks; i++) {
-            Dl_info info;
-            auto frame = last_frames[i + skip_stacks];
-            constexpr int ptr_size = 2 + sizeof(void *) * 2;
-            if (dladdr(frame, &info) && info.dli_sname) {
-                int status;
-                char *demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
-                const char *func_name = status == 0 ? demangled : info.dli_sname;
-                size_t func_size = strlen(func_name);
-                buf.resize(func_size + 100);
-
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " %s + %zd\n",
-                             i, ptr_size, reinterpret_cast<uintptr_t>(frame),
-                             status == 0 ? demangled : info.dli_sname,
-                             (char *) frame - (char *) info.dli_saddr);
-                free(demangled);
-            } else {
-                buf.resize(100);
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " ??\n",
-                             i, ptr_size, reinterpret_cast<uintptr_t>(frame));
+        // Anchor at the frame above our __cxa_throw hook (robust vs. a hard-coded
+        // count); fall back to a fixed skip if the hook can't be named (stripped).
+        size_t start = 0;
+        bool anchored = false;
+        for (size_t i = 0; i < resolved.size(); ++i) {
+            if (resolved[i].function.find("cxa_throw") != std::string::npos) {
+                start = i + 1;
+                anchored = true;
             }
-            buf.resize(l);
-            trace_buf << buf;
+        }
+        if (!anchored) {
+#ifdef NDEBUG
+            constexpr size_t skip_stacks = 3;
+#else
+            constexpr size_t skip_stacks = 10;
+#endif
+            start = std::min<size_t>(skip_stacks, items_.size());
         }
 
-        return trace_buf.str();
+        std::ostringstream os;
+        for (size_t i = start; i < items_.size(); ++i) {
+            const detail::ResolvedFrame &rf = resolved[i];
+
+            // Address is the module's link-time VA (addr2line -e <module> /
+            // atos -o <module> coordinate), ASLR-stable.
+            os << "#" << std::setw(2) << std::setfill(' ') << (i - start) << "  "
+               << (rf.module.empty() ? "?" : rf.module)
+               << "+0x" << std::hex << rf.rel_addr << std::dec;
+            if (!rf.function.empty())
+                os << "  " << rf.function << "+0x" << std::hex << rf.func_offset << std::dec;
+            os << "\n";
+        }
+
+        return os.str();
     }
 }
 #endif

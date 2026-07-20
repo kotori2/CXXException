@@ -35,7 +35,7 @@ namespace CXXException {
     public:
         explicit StackTrace(std::string_view exception_name);
 
-        CXXEXCEPTION_API std::string to_string();
+        CXXEXCEPTION_API std::string to_string() const;
     };
 }
 

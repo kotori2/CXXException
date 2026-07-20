@@ -14,6 +14,15 @@ set(CXXException_SRC
         StackTraceSaver.cpp
         StackTrace.cpp
         CXXHook.cpp)
+# Symbol resolution (detail::resolve_frame) is split per platform into its own
+# translation unit, plugged into the shared StackTrace.cpp.
+if(WIN32)
+    list(APPEND CXXException_SRC resolve_win.cpp)
+elseif(APPLE)
+    list(APPEND CXXException_SRC resolve_macho.cpp)
+else()
+    list(APPEND CXXException_SRC resolve_elf.cpp)
+endif()
 set(CXXException_INCLUDE_DIR include)
 add_executable(CXXException_example main.cpp ${CXXException_SRC})
 add_library(CXXException_static STATIC ${CXXException_SRC})
@@ -26,16 +35,13 @@ set_target_properties(CXXException_shared PROPERTIES
         OUTPUT_NAME CXXException
         ARCHIVE_OUTPUT_NAME CXXException_imp)
 target_compile_definitions(CXXException_shared PRIVATE CXXEXCEPTION_SHARED_BUILD)
-# On Windows, _CxxThrowException cannot carry __declspec(dllexport) without
-# triggering C2375 (conflicts with the compiler's internal C++ declaration).
-# Export it via a module definition file instead.
+# _CxxThrowException can't carry dllexport (C2375); export it via the .def file.
 if(WIN32)
     target_sources(CXXException_shared PRIVATE CXXException.def)
 endif()
 
-# MinGW ignores #pragma comment(lib,...); link psapi and dbghelp explicitly.
-# (MSVC handles these via #pragma comment in StackTrace.cpp, so only needed
-# for non-MSVC Windows builds.)
+# MinGW ignores #pragma comment(lib,...); link psapi/dbghelp explicitly
+# (MSVC handles these via #pragma comment).
 if(WIN32 AND NOT MSVC)
     foreach(_tgt CXXException_static CXXException_shared CXXException_example)
         target_link_libraries(${_tgt} PUBLIC psapi dbghelp)
@@ -51,20 +57,14 @@ add_executable(test_static tests/test_basic.cpp)
 target_include_directories(test_static PRIVATE ${CXXException_INCLUDE_DIR})
 target_link_libraries(test_static PRIVATE CXXException_static)
 if(UNIX AND NOT APPLE)
-    # backtrace/dladdr live in libdl on Linux (in libc on glibc >= 2.34, but
-    # linking -ldl is always safe).
+    # backtrace/dladdr need -ldl on Linux (folded into libc on glibc >= 2.34).
     target_link_libraries(test_static PRIVATE dl)
 endif()
 add_test(NAME static_tests COMMAND test_static)
 
-# Shared-linkage test: the dylib/DLL exports __cxa_throw / _CxxThrowException
-# and must shadow the runtime's symbol.
-#
-#  macOS  – DYLD_INTERPOSE in the dylib patches all images at load time;
-#            no consumer-side flags are needed.
-#  Linux  – flat namespace by default; explicit link order is sufficient.
-#  Windows – CMake links our import library before the default vcruntime.lib,
-#            so _CxxThrowException resolves to CXXException.dll at link time.
+# Shared-linkage test: the dylib/DLL must shadow the runtime's __cxa_throw /
+# _CxxThrowException — macOS via DYLD_INTERPOSE, Linux via link order, Windows by
+# linking our import lib before vcruntime.
 add_executable(test_shared tests/test_basic.cpp)
 target_include_directories(test_shared PRIVATE ${CXXException_INCLUDE_DIR})
 target_link_libraries(test_shared PRIVATE CXXException_shared)
