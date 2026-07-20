@@ -156,9 +156,12 @@ namespace CXXException::detail {
 
         rf.module = basename_of(info.dli_fname);
         const auto module_base = reinterpret_cast<std::uintptr_t>(info.dli_fbase);
-        rf.rel_addr = addr - module_base;
 
         const SymbolTable &table = get_table(info.dli_fname);
+        // Print the module's own link-time VA (the addr2line -e <module> coordinate):
+        // ET_DYN (PIE/shared) has preferred base 0 -> pc - load_base; ET_EXEC -> absolute pc.
+        rf.rel_addr = table.is_dyn ? (addr - module_base) : addr;
+
         if (table.loaded && !table.funcs.empty()) {
             // Normalize the (call-site) address into the symbol table's coordinates.
             const std::uintptr_t key = table.is_dyn ? (lookup - module_base) : lookup;

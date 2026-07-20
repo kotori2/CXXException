@@ -248,8 +248,8 @@ namespace CXXException {
         for (size_t i = start; i < items_.size(); ++i) {
             const detail::ResolvedFrame &rf = resolved[i];
 
-            // module + 0xoffset from the module's load base: ASLR-stable. For ET_DYN
-            // (PIE/shared) this is the addr2line/atos address; for non-PIE add the link base.
+            // Address is the module's link-time VA (addr2line -e <module> /
+            // atos -o <module> coordinate), ASLR-stable.
             os << "#" << std::setw(2) << std::setfill(' ') << (i - start) << "  "
                << (rf.module.empty() ? "?" : rf.module)
                << "+0x" << std::hex << rf.rel_addr << std::dec;

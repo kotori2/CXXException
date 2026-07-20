@@ -16,7 +16,8 @@ namespace CXXException::detail {
     struct ResolvedFrame {
         std::string module;          // module basename; empty if unknown
         std::string function;        // demangled name; empty if unknown
-        std::uintptr_t rel_addr;     // offset from module load base (ASLR-stable); raw pc if unknown
+        std::uintptr_t rel_addr;     // module-relative addr for offline symbolication, ASLR-stable
+                                     // (*nix: link-time VA; Windows: RVA); raw pc if module unknown
         std::uintptr_t func_offset;  // offset within `function` (0 when function empty)
     };
 

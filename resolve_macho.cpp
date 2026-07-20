@@ -34,6 +34,7 @@ namespace CXXException::detail {
 
         struct MachoTable {
             bool loaded = false;
+            std::uintptr_t slide = 0;            // load base - __TEXT vmaddr
             std::vector<std::uintptr_t> starts;  // function starts (runtime), sorted
             std::vector<FuncSym> syms;           // named symbols (runtime), sorted by value
         };
@@ -81,9 +82,11 @@ namespace CXXException::detail {
                 lc = reinterpret_cast<const load_command *>(
                         reinterpret_cast<std::uintptr_t>(lc) + lc->cmdsize);
             }
-            if (!have_text || !have_linkedit || !func_starts) return table;
-
+            if (!have_text) return table;
             const std::uintptr_t slide = base - text_vmaddr;
+            table.slide = slide;
+            if (!have_linkedit || !func_starts) return table;
+
             // __LINKEDIT holds the symbol/string/function-starts data; its file
             // offsets map to memory through this base.
             auto linkedit = reinterpret_cast<const std::uint8_t *>(
@@ -153,9 +156,13 @@ namespace CXXException::detail {
         }
 
         rf.module = basename_of(info.dli_fname);
-        rf.rel_addr = addr - reinterpret_cast<std::uintptr_t>(info.dli_fbase);
 
         const MachoTable &table = get_table(info.dli_fname, info.dli_fbase);
+        // Print the module's own link-time VA (the atos -o <module> coordinate):
+        // pc - slide, i.e. including __TEXT's preferred base (0x100000000 for the
+        // main executable).
+        rf.rel_addr = table.slide ? addr - table.slide
+                                  : addr - reinterpret_cast<std::uintptr_t>(info.dli_fbase);
         if (table.loaded) {
             // Which function does the call site fall in?
             auto sit = std::upper_bound(table.starts.begin(), table.starts.end(), lookup);
