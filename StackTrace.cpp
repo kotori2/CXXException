@@ -20,8 +20,7 @@
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "dbghelp.lib")
 
-// Some versions of imagehlp.dll lack the proper packing directives themselves
-// so we need to do it.
+// Some imagehlp.dll versions lack their own packing directives.
 #pragma pack( push, before_imagehlp, 8 )
 #pragma pack( pop, before_imagehlp )
 
@@ -179,7 +178,7 @@ bool CXXException::StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
     return true;
 }
 
-std::string CXXException::StackTrace::to_string() {
+std::string CXXException::StackTrace::to_string() const {
     std::stringstream os;
     IMAGEHLP_LINE64 line = {0};
     line.SizeOfStruct = sizeof line;
@@ -223,14 +222,16 @@ std::string CXXException::StackTrace::to_string() {
 }
 #else
 
-#include <iostream>
-#include <sstream>
-#include <cstring>
-#include <dlfcn.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <execinfo.h>
-#include <exception>
-#include <cxxabi.h>
-#include <cinttypes>
+#include <iomanip>
+#include <new>
+#include <sstream>
+#include <string>
+
+#include "SymbolResolver.h"
 
 namespace CXXException {
     constexpr int PTR_SIZE = sizeof(void *);
@@ -260,46 +261,47 @@ namespace CXXException {
         free(last_frames);
     }
 
-    std::string StackTrace::to_string() {
-        void **last_frames = static_cast<void **>(malloc(items_.size() * PTR_SIZE));
-        for (int i = 0; i < items_.size(); i++) {
-            last_frames[i] = items_[i].frame;
-        }
-        std::string buf;
-        std::ostringstream trace_buf;
-        int l;
+    std::string StackTrace::to_string() const {
+        // Resolve all frames first; the names let us find and drop our own throw
+        // machinery (the __cxa_throw hook and the StackTrace construction path).
+        std::vector<detail::ResolvedFrame> resolved(items_.size());
+        for (size_t i = 0; i < items_.size(); ++i)
+            resolved[i] = detail::resolve_frame(items_[i].frame);
 
-#ifdef NDEBUG
-        constexpr int skip_stacks = 3;
-#else
-        constexpr int skip_stacks = 10;
-#endif
-        for (int i = 0; i < items_.size() - skip_stacks; i++) {
-            Dl_info info;
-            auto frame = last_frames[i + skip_stacks];
-            constexpr int ptr_size = 2 + sizeof(void *) * 2;
-            if (dladdr(frame, &info) && info.dli_sname) {
-                int status;
-                char *demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
-                const char *func_name = status == 0 ? demangled : info.dli_sname;
-                size_t func_size = strlen(func_name);
-                buf.resize(func_size + 100);
-
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " %s + %zd\n",
-                             i, ptr_size, reinterpret_cast<uintptr_t>(frame),
-                             status == 0 ? demangled : info.dli_sname,
-                             (char *) frame - (char *) info.dli_saddr);
-                free(demangled);
-            } else {
-                buf.resize(100);
-                l = snprintf(buf.data(), buf.size(), "%-3d %0*" PRIxPTR " ??\n",
-                             i, ptr_size, reinterpret_cast<uintptr_t>(frame));
+        // Anchor at the frame above our __cxa_throw hook (robust vs. a hard-coded
+        // count); fall back to a fixed skip if the hook can't be named (stripped).
+        size_t start = 0;
+        bool anchored = false;
+        for (size_t i = 0; i < resolved.size(); ++i) {
+            if (resolved[i].function.find("cxa_throw") != std::string::npos) {
+                start = i + 1;
+                anchored = true;
             }
-            buf.resize(l);
-            trace_buf << buf;
+        }
+        if (!anchored) {
+#ifdef NDEBUG
+            constexpr size_t skip_stacks = 3;
+#else
+            constexpr size_t skip_stacks = 10;
+#endif
+            start = std::min<size_t>(skip_stacks, items_.size());
         }
 
-        return trace_buf.str();
+        std::ostringstream os;
+        for (size_t i = start; i < items_.size(); ++i) {
+            const detail::ResolvedFrame &rf = resolved[i];
+
+            // module + 0xoffset from the module's load base: ASLR-stable. For ET_DYN
+            // (PIE/shared) this is the addr2line/atos address; for non-PIE add the link base.
+            os << "#" << std::setw(2) << std::setfill(' ') << (i - start) << "  "
+               << (rf.module.empty() ? "?" : rf.module)
+               << "+0x" << std::hex << rf.rel_addr << std::dec;
+            if (!rf.function.empty())
+                os << "  " << rf.function << " + " << rf.func_offset;
+            os << "\n";
+        }
+
+        return os.str();
     }
 }
 #endif

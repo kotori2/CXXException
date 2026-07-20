@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 // Prints [FAIL] and returns false so the caller can tally failures without
 // aborting immediately — every test runs even if an earlier one fails.
@@ -121,6 +122,11 @@ bool test_deep_call_stack() {
         auto st = saver().retrieve(&e);
         CHECK(st != nullptr);
         CHECK(!st->to_string().empty());
+#if !defined(_WIN32) && !defined(NDEBUG)
+        // *nix resolver reads .symtab/LC_SYMTAB, so the static throw-site deep3()
+        // must resolve by name (the old dladdr/.dynsym path couldn't).
+        CHECK(st->to_string().find("deep3") != std::string::npos);
+#endif
     }
     std::cout << "[PASS] " << __func__ << "\n";
     return true;
