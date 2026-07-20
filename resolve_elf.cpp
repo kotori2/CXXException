@@ -13,10 +13,14 @@
 
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace CXXException::detail {
     namespace {
@@ -33,30 +37,46 @@ namespace CXXException::detail {
             std::vector<FuncSym> funcs;       // sorted ascending by value
         };
 
-        std::vector<char> read_file(const std::string &path) {
-            std::ifstream f(path, std::ios::binary | std::ios::ate);
-            if (!f) return {};
-            std::streamsize n = f.tellg();
-            if (n <= 0) return {};
-            std::vector<char> buf(static_cast<size_t>(n));
-            f.seekg(0);
-            if (!f.read(buf.data(), n)) return {};
-            return buf;
-        }
+        // RAII read-only mmap. mmap faults in only the pages actually touched
+        // (ELF header, section headers, .symtab, .strtab), so we never read the
+        // whole binary — just the few sections we parse.
+        struct MappedFile {
+            const char *data = nullptr;
+            size_t size = 0;
+            explicit MappedFile(const std::string &path) {
+                int fd = open(path.c_str(), O_RDONLY);
+                if (fd < 0) return;
+                struct stat st{};
+                if (fstat(fd, &st) == 0 && st.st_size > 0) {
+                    void *m = mmap(nullptr, static_cast<size_t>(st.st_size),
+                                   PROT_READ, MAP_PRIVATE, fd, 0);
+                    if (m != MAP_FAILED) {
+                        data = static_cast<const char *>(m);
+                        size = static_cast<size_t>(st.st_size);
+                    }
+                }
+                close(fd);
+            }
+            ~MappedFile() { if (data) munmap(const_cast<char *>(data), size); }
+            MappedFile(const MappedFile &) = delete;
+            MappedFile &operator=(const MappedFile &) = delete;
+        };
 
         SymbolTable parse_elf(const std::string &path) {
             SymbolTable table;
-            std::vector<char> buf = read_file(path);
-            if (buf.size() < sizeof(ElfW(Ehdr))) return table;
-
-            const char *base = buf.data();
+            // Mapping stays alive for the whole function; symbol names are copied into
+            // std::string below, so the table owns them after the mapping is released.
+            MappedFile file(path);
+            const char *base = file.data;
+            const size_t size = file.size;
+            if (size < sizeof(ElfW(Ehdr))) return table;
             auto *eh = reinterpret_cast<const ElfW(Ehdr) *>(base);
             if (std::memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0) return table;
 
             table.is_dyn = (eh->e_type == ET_DYN);
 
             if (eh->e_shoff == 0 || eh->e_shnum == 0 || eh->e_shentsize == 0) return table;
-            if (eh->e_shoff + static_cast<std::uintptr_t>(eh->e_shnum) * eh->e_shentsize > buf.size())
+            if (eh->e_shoff + static_cast<std::uintptr_t>(eh->e_shnum) * eh->e_shentsize > size)
                 return table;
 
             auto section = [&](unsigned i) {
@@ -77,8 +97,8 @@ namespace CXXException::detail {
             if (chosen->sh_link >= eh->e_shnum) return table;
 
             const ElfW(Shdr) *strhdr = section(chosen->sh_link);
-            if (chosen->sh_offset + chosen->sh_size > buf.size()) return table;
-            if (strhdr->sh_offset + strhdr->sh_size > buf.size()) return table;
+            if (chosen->sh_offset + chosen->sh_size > size) return table;
+            if (strhdr->sh_offset + strhdr->sh_size > size) return table;
 
             const char *strtab = base + strhdr->sh_offset;
             const size_t strtab_size = strhdr->sh_size;
