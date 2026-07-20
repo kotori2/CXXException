@@ -3,6 +3,7 @@
 //
 
 #include <CXXException/StackTrace.h>
+#include "SymbolResolver.h"
 
 #ifdef WIN32
 #include <Windows.h>
@@ -11,7 +12,6 @@
 #include <vector>
 #include <Psapi.h>
 #include <algorithm>
-#include <iostream>
 #include <stdexcept>
 #include <iterator>
 #include <sstream>
@@ -74,31 +74,6 @@ void sym_options(DWORD add, DWORD remove=0) {
     symOptions &= ~remove;
     SymSetOptions(symOptions);
 }
-
-class symbol {
-    typedef IMAGEHLP_SYMBOL64 sym_type;
-    sym_type *sym;
-    static const int max_name_len = 1024;
-public:
-    symbol(HANDLE process, DWORD64 address) : sym((sym_type *)::operator new(sizeof(*sym) + max_name_len)) {
-        memset(sym, 0, sizeof(*sym) + max_name_len);
-        sym->SizeOfStruct = sizeof(*sym);
-        sym->MaxNameLength = max_name_len;
-        DWORD64 displacement;
-
-        if (!SymGetSymFromAddr64(process, address, &displacement, sym)) {
-            // throw std::logic_error("Bad symbol");
-        }
-
-    }
-
-    [[maybe_unused]] std::string name() { return sym->Name; }
-    std::string undecorated_name() {
-        std::vector<char> und_name(max_name_len);
-        UnDecorateSymbolName(sym->Name, &und_name[0], max_name_len, UNDNAME_COMPLETE);
-        return {&und_name[0], strlen(&und_name[0])};
-    }
-};
 
 class get_mod_info {
     HANDLE process;
@@ -179,14 +154,9 @@ bool CXXException::StackTrace::parse_stack(HANDLE hThread, CONTEXT &c) {
 }
 
 std::string CXXException::StackTrace::to_string() const {
-    std::stringstream os;
-    IMAGEHLP_LINE64 line = {0};
-    line.SizeOfStruct = sizeof line;
-    DWORD offset_from_symbol = 0;
-    auto process = GetCurrentProcess();
-    SymHandler handler(process, nullptr, true);
-
-    auto modules = load_modules_symbols(process, GetCurrentProcessId());
+    std::ostringstream os;
+    // dbghelp session for detail::resolve_frame (SymInitialize / SymCleanup, RAII).
+    SymHandler handler(GetCurrentProcess(), nullptr, true);
 
 #ifdef NDEBUG
     constexpr int skip_stacks = 3;
@@ -194,29 +164,18 @@ std::string CXXException::StackTrace::to_string() const {
     constexpr int skip_stacks = 5;
 #endif
 
+    // Same format as the POSIX path: #<idx>  <module>+0x<rel>  <func>+0x<off>.
     const int skip = std::min(skip_stacks, static_cast<int>(items_.size()));
-    for (auto i = items_.begin() + skip; i != items_.end(); ++i) {
-        auto &&s = i->frame;
-        if ( s.AddrPC.Offset != 0 ) {
-            // find module
-            module_data module{};
-            for (const auto &m: modules) {
-                auto base_address = reinterpret_cast<uintptr_t>(m.base_address);
-                if (s.AddrPC.Offset > base_address && s.AddrPC.Offset < base_address + m.load_size) {
-                    module = m;
-                    break;
-                }
-            }
-            // auto base_address = reinterpret_cast<uintptr_t>(module.base_address);
-            os << "0x" << std::setfill('0') << std::setw(4) << std::hex << s.AddrPC.Offset << " ";
-            os << "[" << module.module_name << "] ";
-            os << std::dec << symbol(process, s.AddrPC.Offset).undecorated_name();
-            if (SymGetLineFromAddr64( process, s.AddrPC.Offset, &offset_from_symbol, &line ) )
-                os << "\t" << line.FileName << "(" << line.LineNumber << ")";
-        } else {
-            os << "(No Symbols: PC == 0)";
-        }
-        os << std::endl;
+    int frame_idx = 0;
+    for (auto i = items_.begin() + skip; i != items_.end(); ++i, ++frame_idx) {
+        auto pc = reinterpret_cast<void *>(i->frame.AddrPC.Offset);
+        detail::ResolvedFrame rf = detail::resolve_frame(pc);
+        os << "#" << std::setw(2) << std::setfill(' ') << frame_idx << "  "
+           << (rf.module.empty() ? "?" : rf.module)
+           << "+0x" << std::hex << rf.rel_addr << std::dec;
+        if (!rf.function.empty())
+            os << "  " << rf.function << "+0x" << std::hex << rf.func_offset << std::dec;
+        os << "\n";
     }
     return os.str();
 }
@@ -230,8 +189,6 @@ std::string CXXException::StackTrace::to_string() const {
 #include <new>
 #include <sstream>
 #include <string>
-
-#include "SymbolResolver.h"
 
 namespace CXXException {
     constexpr int PTR_SIZE = sizeof(void *);
@@ -297,7 +254,7 @@ namespace CXXException {
                << (rf.module.empty() ? "?" : rf.module)
                << "+0x" << std::hex << rf.rel_addr << std::dec;
             if (!rf.function.empty())
-                os << "  " << rf.function << " + " << rf.func_offset;
+                os << "  " << rf.function << "+0x" << std::hex << rf.func_offset << std::dec;
             os << "\n";
         }
 

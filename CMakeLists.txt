@@ -14,12 +14,14 @@ set(CXXException_SRC
         StackTraceSaver.cpp
         StackTrace.cpp
         CXXHook.cpp)
-# *nix symbol resolution is split per-ABI into its own translation unit; pick the
-# one matching the platform. Windows keeps its dbghelp path inside StackTrace.cpp.
-if(UNIX AND NOT APPLE)
-    list(APPEND CXXException_SRC resolve_elf.cpp)
+# Symbol resolution (detail::resolve_frame) is split per platform into its own
+# translation unit, plugged into the shared StackTrace.cpp.
+if(WIN32)
+    list(APPEND CXXException_SRC resolve_win.cpp)
 elseif(APPLE)
     list(APPEND CXXException_SRC resolve_macho.cpp)
+else()
+    list(APPEND CXXException_SRC resolve_elf.cpp)
 endif()
 set(CXXException_INCLUDE_DIR include)
 add_executable(CXXException_example main.cpp ${CXXException_SRC})

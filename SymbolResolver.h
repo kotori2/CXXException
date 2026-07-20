@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <string>
-#include <cxxabi.h>
 
 namespace CXXException::detail {
 
@@ -21,10 +20,16 @@ namespace CXXException::detail {
         std::uintptr_t func_offset;  // offset within `function` (0 when function empty)
     };
 
-    // Implemented per-platform (resolve_elf.cpp / resolve_macho.cpp).
+    // Implemented per-platform (resolve_elf.cpp / resolve_macho.cpp / resolve_win.cpp).
     ResolvedFrame resolve_frame(void *pc);
 
+}
+
+#ifndef _WIN32
+#include <cxxabi.h>
+namespace CXXException::detail {
     // Demangled name, or the original string on failure (empty if null).
+    // Windows demangles via UnDecorateSymbolName in resolve_win.cpp instead.
     inline std::string demangle(const char *mangled) {
         if (!mangled) return {};
         int status = 0;
@@ -33,7 +38,7 @@ namespace CXXException::detail {
         std::free(out);
         return result;
     }
-
 }
+#endif
 
 #endif //CXXEXCEPTION_SYMBOLRESOLVER_H
